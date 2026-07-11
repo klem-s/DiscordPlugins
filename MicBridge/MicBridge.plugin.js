@@ -2,11 +2,10 @@
  * @name MicBridge
  * @author klem___s
  * @authorId 321332083731726338
- * @description Bridges Discord's real self-mute state with an external
- *   controller (e.g. a Stream Deck server) over a local WebSocket.
- *   Pushes live mute-state changes out, and accepts mute/unmute/toggle
- *   commands in.
- * @version 1.0.0
+ * @description Bridges Discord's real self-mute/self-deafen state with an
+ *   external controller (e.g. a Stream Deck server) over a local WebSocket.
+ *   Pushes live state changes out, and accepts mute/deafen commands in.
+ * @version 1.1.0
  * @website https://github.com/klem-s
  * @source https://github.com/klem-s
  */
@@ -88,8 +87,13 @@ module.exports = class MicBridge {
         return !!this.MediaEngineStore?.isSelfMute?.();
     }
 
+    _isDeafened() {
+        return !!this.MediaEngineStore?.isSelfDeaf?.();
+    }
+
     // ─────────────────────────────────────────────────────────────
-    //  Commands coming from the server: {"cmd": "toggle"|"mute"|"unmute"}
+    //  Commands coming from the server:
+    //  {"cmd": "toggle"|"mute"|"unmute"|"toggle_deafen"|"deafen"|"undeafen"}
     // ─────────────────────────────────────────────────────────────
 
     _applyCommand(cmd) {
@@ -99,7 +103,8 @@ module.exports = class MicBridge {
             return;
         }
 
-        const muted = this._isMuted();
+        const muted    = this._isMuted();
+        const deafened = this._isDeafened();
 
         if (cmd === "toggle") {
             actions.toggleSelfMute();
@@ -107,13 +112,23 @@ module.exports = class MicBridge {
             actions.toggleSelfMute();
         } else if (cmd === "unmute" && muted) {
             actions.toggleSelfMute();
+        } else if (cmd === "toggle_deafen") {
+            if (typeof actions.toggleSelfDeaf !== "function") {
+                console.warn("[MicBridge] toggleSelfDeaf module not found");
+                return;
+            }
+            actions.toggleSelfDeaf();
+        } else if (cmd === "deafen" && !deafened) {
+            actions.toggleSelfDeaf?.();
+        } else if (cmd === "undeafen" && deafened) {
+            actions.toggleSelfDeaf?.();
         }
         // Resulting state is reported back via the MediaEngineStore change listener.
     }
 
     // ─────────────────────────────────────────────────────────────
     //  WebSocket bridge to the local server
-    //  Outgoing: {"type": "state", "muted": bool}
+    //  Outgoing: {"type": "state", "muted": bool, "deafened": bool}
     // ─────────────────────────────────────────────────────────────
 
     _connect() {
@@ -129,7 +144,7 @@ module.exports = class MicBridge {
         }
 
         this._ws.onopen = () => {
-            this._send({ type: "state", muted: this._isMuted() });
+            this._send({ type: "state", muted: this._isMuted(), deafened: this._isDeafened() });
         };
 
         this._ws.onmessage = (event) => {
@@ -158,6 +173,6 @@ module.exports = class MicBridge {
     }
 
     _handleStoreChange() {
-        this._send({ type: "state", muted: this._isMuted() });
+        this._send({ type: "state", muted: this._isMuted(), deafened: this._isDeafened() });
     }
 };
