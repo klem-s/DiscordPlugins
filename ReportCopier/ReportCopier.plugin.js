@@ -18,16 +18,24 @@ module.exports = class ReportCopier {
     // ─────────────────────────────────────────────────────────────
 
     constructor() {
-        this._toggleBtn = null;
+        this._toggleBtn  = null;
+        this._unpatches  = [];
+        this._sourceLink = "";
+        this._destLink   = "";
     }
 
     start() {
         this._injectCSS();
         this._createToggleButton();
+        this._unpatches.push(
+            BdApi.ContextMenu.patch("message", this._patchMessageMenu.bind(this))
+        );
         BdApi.UI.showToast("ReportCopier enabled 📤", { type: "success", timeout: 2000 });
     }
 
     stop() {
+        this._unpatches.forEach(u => u());
+        this._unpatches = [];
         this._toggleBtn?.remove();
         this._toggleBtn = null;
         BdApi.DOM.removeStyle("ReportCopier");
@@ -255,6 +263,70 @@ module.exports = class ReportCopier {
     }
 
     // ─────────────────────────────────────────────────────────────
+    //  Context menu — capture a message's link as source/destination
+    //  without leaving the chat to paste it into the modal by hand.
+    // ─────────────────────────────────────────────────────────────
+
+    _patchMessageMenu(retVal, props) {
+        const { message, channel } = props;
+        if (!message) return;
+
+        const guildId  = channel?.guild_id ?? "@me";
+        const channelId = message.channel_id ?? channel?.id;
+        const link = `https://discord.com/channels/${guildId}/${channelId}/${message.id}`;
+
+        this._pushToMenu(retVal, [
+            BdApi.ContextMenu.buildItem({ type: "separator" }),
+            BdApi.ContextMenu.buildItem({
+                label  : "📤 ReportCopier : définir comme Source",
+                action : () => this._captureLink("source", link),
+            }),
+            BdApi.ContextMenu.buildItem({
+                label  : "📥 ReportCopier : définir comme Destination",
+                action : () => this._captureLink("dest", link),
+            }),
+        ]);
+    }
+
+    _captureLink(kind, link) {
+        if (kind === "source") {
+            this._sourceLink = link;
+            BdApi.UI.showToast("📤 Source enregistrée.", { type: "success", timeout: 1500 });
+        } else {
+            this._destLink = link;
+            BdApi.UI.showToast("📥 Destination enregistrée.", { type: "success", timeout: 1500 });
+        }
+    }
+
+    // Safely push items into a context-menu React element.
+    // Handles: plain array, frozen array, single element, nested children.
+    _pushToMenu(retVal, items) {
+        if (!retVal?.props) return;
+        try {
+            let target = retVal.props;
+            let ch     = target.children;
+
+            // Some Discord versions nest children one level deeper
+            if (!Array.isArray(ch) && Array.isArray(ch?.props?.children)) {
+                target = ch.props;
+                ch     = target.children;
+            }
+
+            if (Array.isArray(ch)) {
+                if (Object.isFrozen(ch)) {
+                    target.children = [...ch, ...items];
+                } else {
+                    ch.push(...items);
+                }
+            } else {
+                target.children = [...(ch != null ? [ch] : []), ...items];
+            }
+        } catch (e) {
+            console.error("[ReportCopier] _pushToMenu failed:", e);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
     //  UI — floating button + link-entry modal
     // ─────────────────────────────────────────────────────────────
 
@@ -269,13 +341,13 @@ module.exports = class ReportCopier {
     }
 
     _openModal() {
-        let sourceLink   = "";
-        let destLink     = "";
+        let sourceLink   = this._sourceLink;
+        let destLink     = this._destLink;
         let deleteSource = false;
 
         const Form = () => {
-            const [src, setSrc] = BdApi.React.useState("");
-            const [dst, setDst] = BdApi.React.useState("");
+            const [src, setSrc] = BdApi.React.useState(this._sourceLink);
+            const [dst, setDst] = BdApi.React.useState(this._destLink);
             const [del, setDel] = BdApi.React.useState(false);
 
             const inputStyle = {
@@ -290,7 +362,7 @@ module.exports = class ReportCopier {
                     BdApi.React.createElement("input", {
                         type: "text", autoFocus: true, style: { ...inputStyle, width: "100%" },
                         placeholder: "https://discord.com/channels/…", value: src,
-                        onChange: e => { setSrc(e.target.value); sourceLink = e.target.value; },
+                        onChange: e => { setSrc(e.target.value); sourceLink = e.target.value; this._sourceLink = e.target.value; },
                     })
                 ),
                 BdApi.React.createElement("div", null,
@@ -298,7 +370,7 @@ module.exports = class ReportCopier {
                     BdApi.React.createElement("input", {
                         type: "text", style: { ...inputStyle, width: "100%" },
                         placeholder: "https://discord.com/channels/…", value: dst,
-                        onChange: e => { setDst(e.target.value); destLink = e.target.value; },
+                        onChange: e => { setDst(e.target.value); destLink = e.target.value; this._destLink = e.target.value; },
                     })
                 ),
                 BdApi.React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text-normal)", cursor: "pointer" } },
@@ -325,6 +397,8 @@ module.exports = class ReportCopier {
                         BdApi.UI.showToast("❌ Renseigne les deux liens avant de confirmer.", { type: "error", timeout: 2500 });
                         return;
                     }
+                    this._sourceLink = "";
+                    this._destLink   = "";
                     this._runCopy(sourceLink, destLink, deleteSource);
                 },
             }
