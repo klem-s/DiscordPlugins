@@ -246,9 +246,9 @@ module.exports = class ReportCopier {
 
                 if (!content && !files.length) continue; // nothing to migrate from this message
 
-                // Small randomized delay between sends so a multi-message copy doesn't
+                // Randomized delay between sends so a multi-message copy doesn't
                 // fire as a burst — spread out closer to how a human would actually type.
-                if (i > 0) await this._sleep(800 + Math.random() * 700);
+                if (i > 0) await this._sleep(2000 + Math.random() * 1000);
 
                 await this._postMessage(dst.channelId, content, files, token);
             }
@@ -266,7 +266,7 @@ module.exports = class ReportCopier {
                     BdApi.UI.showToast("🗑️ Post source (doublon) supprimé.", { type: "info", timeout: 2000 });
                 } else {
                     for (let i = 0; i < messages.length; i++) {
-                        if (i > 0) await this._sleep(800 + Math.random() * 700);
+                        if (i > 0) await this._sleep(2000 + Math.random() * 1000);
                         await this._api(`/channels/${src.channelId}/messages/${messages[i].id}`, token, { method: "DELETE" });
                     }
                     BdApi.UI.showToast("🗑️ Message(s) source supprimé(s).", { type: "info", timeout: 2000 });
