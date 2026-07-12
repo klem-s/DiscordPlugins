@@ -30,6 +30,13 @@ module.exports = class ReportCopier {
         this._unpatches.push(
             BdApi.ContextMenu.patch("message", this._patchMessageMenu.bind(this))
         );
+        // A pasted Discord channel/thread/message link gets rendered inline as a
+        // "channel mention" chip (its own component, not a plain <a>), with its own
+        // context menu — patch that one too so right-clicking a specific link inside
+        // a message with several links scopes capture to just that link.
+        this._unpatches.push(
+            BdApi.ContextMenu.patch("channel-mention-context", this._patchChannelMentionMenu.bind(this))
+        );
         BdApi.UI.showToast("ReportCopier enabled 📤", { type: "success", timeout: 2000 });
     }
 
@@ -283,6 +290,38 @@ module.exports = class ReportCopier {
             }),
             BdApi.ContextMenu.buildItem({
                 label  : "📥 ReportCopier : définir comme Destination",
+                action : () => this._captureLink("dest", link),
+            }),
+        ]);
+    }
+
+    // A pasted Discord channel/thread/message link is rendered inline as a "channel
+    // mention" chip (Discord's own component — not a plain <a>), so right-clicking it
+    // opens the "channel-mention-context" menu instead of our "message" menu. Patching
+    // it here scopes capture to that specific link when a message contains several.
+    _patchChannelMentionMenu(retVal, props) {
+        const channel   = props.channel;
+        const channelId = channel?.id ?? props.channelId;
+        const guildId   = channel?.guild_id ?? props.guildId ?? "@me";
+        const messageId = props.messageId ?? props.message?.id ?? null;
+
+        if (!channelId) {
+            console.warn("[ReportCopier] channel-mention-context: couldn't find a channel id in props", props);
+            return;
+        }
+
+        const link = messageId
+            ? `https://discord.com/channels/${guildId}/${channelId}/${messageId}`
+            : `https://discord.com/channels/${guildId}/${channelId}`;
+
+        this._pushToMenu(retVal, [
+            BdApi.ContextMenu.buildItem({ type: "separator" }),
+            BdApi.ContextMenu.buildItem({
+                label  : "📤 Définir comme Source (ReportCopier)",
+                action : () => this._captureLink("source", link),
+            }),
+            BdApi.ContextMenu.buildItem({
+                label  : "📥 Définir comme Destination (ReportCopier)",
                 action : () => this._captureLink("dest", link),
             }),
         ]);
