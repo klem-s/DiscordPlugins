@@ -108,15 +108,6 @@ module.exports = class ReportCopier {
         const url     = `https://discord.com/api/v9${path}`;
         const headers = { Authorization: token, ...(opts.headers ?? {}) };
 
-        // BdApi.Net.fetch replaces the auto-computed Content-Type (e.g. the multipart
-        // boundary for a FormData body) with whatever headers we pass in, so a FormData
-        // body needs its boundary header extracted and re-attached explicitly here.
-        if (opts.body instanceof FormData && !headers["Content-Type"]) {
-            const boundaryProbe = new Request(url, { method: opts.method ?? "GET", body: opts.body });
-            const contentType   = boundaryProbe.headers.get("content-type");
-            if (contentType) headers["Content-Type"] = contentType;
-        }
-
         const resp = await BdApi.Net.fetch(url, { ...opts, headers });
         if (!resp.ok) {
             const body = await resp.text().catch(() => "");
@@ -163,14 +154,35 @@ module.exports = class ReportCopier {
         return files;
     }
 
+    // Builds the multipart body by hand with a boundary we choose ourselves. FormData
+    // won't do here: BdApi.Net.fetch re-wraps the body into its own Request internally,
+    // and Chromium mints a *new* random boundary each time a FormData body is extracted —
+    // so a boundary read off one Request never matches the bytes serialized by another,
+    // and Discord's parser silently fails to find the payload_json field.
+    _buildMultipartBody(payload, files) {
+        const boundary = `ReportCopier${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+        const CRLF = "\r\n";
+        const parts = [
+            `--${boundary}${CRLF}Content-Disposition: form-data; name="payload_json"${CRLF}Content-Type: application/json${CRLF}${CRLF}${JSON.stringify(payload)}${CRLF}`,
+        ];
+        files.forEach((f, i) => {
+            parts.push(`--${boundary}${CRLF}Content-Disposition: form-data; name="files[${i}]"; filename="${f.filename}"${CRLF}Content-Type: ${f.blob.type || "application/octet-stream"}${CRLF}${CRLF}`);
+            parts.push(f.blob);
+            parts.push(CRLF);
+        });
+        parts.push(`--${boundary}--${CRLF}`);
+
+        return { body: new Blob(parts), contentType: `multipart/form-data; boundary=${boundary}` };
+    }
+
     async _postMessage(channelId, content, files, token) {
-        const form    = new FormData();
         const payload = { content };
         if (files.length) payload.attachments = files.map((f, i) => ({ id: i, filename: f.filename }));
-        form.append("payload_json", JSON.stringify(payload));
-        files.forEach((f, i) => form.append(`files[${i}]`, f.blob, f.filename));
 
-        return this._api(`/channels/${channelId}/messages`, token, { method: "POST", body: form });
+        const { body, contentType } = this._buildMultipartBody(payload, files);
+        return this._api(`/channels/${channelId}/messages`, token, {
+            method: "POST", body, headers: { "Content-Type": contentType },
+        });
     }
 
     // ─────────────────────────────────────────────────────────────
