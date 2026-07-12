@@ -21,6 +21,8 @@ module.exports = class ForumUnfollower {
     }
 
     start() {
+        this.ActiveJoinedThreadsStore = BdApi.Webpack.getStore("ActiveJoinedThreadsStore");
+
         this._unpatches.push(
             BdApi.ContextMenu.patch("channel-context", this._patchChannelMenu.bind(this))
         );
@@ -102,19 +104,20 @@ module.exports = class ForumUnfollower {
         return resp.status === 204 ? null : resp.json();
     }
 
-    // Threads (posts) the current user is a member of are the ones they're "following" —
-    // notifications only fire for threads you're a member of. Both the active-threads and
-    // archived-threads endpoints only ever report ThreadMember entries for the requesting
-    // user, so every id that shows up in `members` is a post this account is following.
+    // Threads (posts) the current user has joined are the ones they're "following" —
+    // notifications only fire for threads you're a member of.
+    //
+    // GET /guilds/{id}/threads/active is bot-only for a user token ("Only bots can use
+    // this endpoint", code 20002) — the real client never calls it either; it instead
+    // gets active-thread state from the gateway (GUILD_CREATE/THREAD_LIST_SYNC) and keeps
+    // it in ActiveJoinedThreadsStore, so we read that local store directly for the active
+    // half instead. Archived threads have no such restriction and stay REST-based.
     async _findFollowedPosts(channel, token) {
         const followed = new Set();
 
-        const active = await this._api(`/guilds/${channel.guild_id}/threads/active`, token);
-        for (const m of active?.members ?? []) {
-            const threadId = m.id ?? m.thread_id;
-            const thread = active?.threads?.find(t => t.id === threadId);
-            if (thread?.parent_id === channel.id) followed.add(threadId);
-        }
+        const activeJoined = this.ActiveJoinedThreadsStore
+            ?.getActiveJoinedThreadsForParent?.(channel.guild_id, channel.id) ?? {};
+        for (const threadId of Object.keys(activeJoined)) followed.add(threadId);
 
         let before = null;
         for (;;) {
