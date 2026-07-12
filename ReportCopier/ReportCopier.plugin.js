@@ -88,13 +88,14 @@ module.exports = class ReportCopier {
     }
 
     // ─────────────────────────────────────────────────────────────
-    //  Link parsing — accepts a message jump link or a plain channel/
-    //  thread link (forum-post starter messages share their thread's ID).
+    //  Link parsing — accepts a message jump link, a plain channel/thread
+    //  link (forum-post starter messages share their thread's ID), or a
+    //  .../{parentChannelId}/threads/{threadId}/{messageId} thread link.
     // ─────────────────────────────────────────────────────────────
 
     _parseLink(link) {
         const m = String(link ?? "").trim().match(
-            /channels\/(@me|\d+)\/(\d+)(?:\/(\d+))?/
+            /channels\/(@me|\d+)\/(?:\d+\/threads\/)?(\d+)(?:\/(\d+))?/
         );
         if (!m) return null;
         return { guildId: m[1], channelId: m[2], messageId: m[3] ?? null };
