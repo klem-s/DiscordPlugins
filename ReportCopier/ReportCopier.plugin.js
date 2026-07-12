@@ -116,14 +116,22 @@ module.exports = class ReportCopier {
         return resp.status === 204 ? null : resp.json();
     }
 
-    // GET /channels/{id}/messages/{id} (fetch a single message) is bot-only — a user token
-    // gets "50001/only bots can use this endpoint". The real client never calls it either:
-    // jumping to a link fetches a 1-message window *around* that ID instead, same as here.
-    async _fetchMessage(channelId, messageId, token) {
-        const list = await this._api(`/channels/${channelId}/messages?around=${messageId}&limit=1`, token);
-        const message = list?.find(m => m.id === messageId) ?? list?.[0];
-        if (!message) throw new Error("Message source introuvable (supprimé ou inaccessible).");
-        return message;
+    // Walks the whole source thread from `afterId` (exclusive) onward, oldest first —
+    // a duplicate report is rarely a single message, it's the starter post plus whatever
+    // follow-up text/images the reporter added afterward, and all of it needs migrating.
+    async _fetchMessagesFrom(channelId, afterId, token) {
+        const messages = [];
+        let after = (BigInt(afterId) - 1n).toString();
+        for (;;) {
+            const batch = await this._api(`/channels/${channelId}/messages?after=${after}&limit=100`, token);
+            if (!batch?.length) break;
+            messages.push(...batch);
+            after = batch[0].id;
+            if (batch.length < 100) break;
+        }
+        if (!messages.length) throw new Error("Message(s) source introuvable(s) (supprimé ou inaccessible).");
+        messages.sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+        return messages;
     }
 
     _collectImages(message) {
@@ -204,36 +212,48 @@ module.exports = class ReportCopier {
             // Forum-post starter messages share their thread's ID, so a plain thread
             // link (no message ID) still resolves to the report's original content.
             const srcMsgId = src.messageId ?? src.channelId;
-            const message   = await this._fetchMessage(src.channelId, srcMsgId, token);
+            const messages = await this._fetchMessagesFrom(src.channelId, srcMsgId, token);
 
-            const images = this._collectImages(message);
-            const files  = await this._downloadImages(images);
+            let totalImages = 0;
+            for (let i = 0; i < messages.length; i++) {
+                const message = messages[i];
+                const images  = this._collectImages(message);
+                const files   = await this._downloadImages(images);
+                totalImages  += files.length;
 
-            const jumpLink = `https://discord.com/channels/${src.guildId}/${src.channelId}/${srcMsgId}`;
-            const authorId = message.author?.id;
+                let content = message.content || "";
+                if (i === 0) {
+                    // Only the first copied message gets the source/reporter footer —
+                    // repeating it on every follow-up message would just be noise.
+                    const jumpLink = `https://discord.com/channels/${src.guildId}/${src.channelId}/${srcMsgId}`;
+                    const authorId = message.author?.id;
+                    const parts    = [content, "", `🔗 Source : ${jumpLink}`];
+                    if (authorId) parts.push(`👤 Reporter : <@${authorId}>`);
+                    content = parts.join("\n").trim();
+                }
+                if (content.length > 1990) content = content.slice(0, 1987) + "…";
 
-            const parts = [message.content || ""];
-            parts.push("");
-            parts.push(`🔗 Source : ${jumpLink}`);
-            if (authorId) parts.push(`👤 Reporter : <@${authorId}>`);
-            let content = parts.join("\n").trim();
-            if (content.length > 1990) content = content.slice(0, 1987) + "…";
+                if (!content && !files.length) continue; // nothing to migrate from this message
 
-            await this._postMessage(dst.channelId, content, files, token);
+                await this._postMessage(dst.channelId, content, files, token);
+            }
 
             BdApi.UI.showToast(
-                `✅ Copié${files.length ? ` (${files.length} image${files.length > 1 ? "s" : ""})` : ""} vers la destination.`,
+                `✅ ${messages.length} message${messages.length > 1 ? "s" : ""} copié${messages.length > 1 ? "s" : ""}` +
+                `${totalImages ? ` (${totalImages} image${totalImages > 1 ? "s" : ""})` : ""} vers la destination.`,
                 { type: "success", timeout: 3000 }
             );
 
             if (deleteSource) {
-                const isReplyOnly = src.messageId && src.messageId !== src.channelId;
-                if (isReplyOnly) {
-                    await this._api(`/channels/${src.channelId}/messages/${src.messageId}`, token, { method: "DELETE" });
-                    BdApi.UI.showToast("🗑️ Message source supprimé.", { type: "info", timeout: 2000 });
-                } else {
+                const isThreadRoot = srcMsgId === src.channelId;
+                if (isThreadRoot) {
                     await this._api(`/channels/${src.channelId}`, token, { method: "DELETE" });
                     BdApi.UI.showToast("🗑️ Post source (doublon) supprimé.", { type: "info", timeout: 2000 });
+                } else {
+                    for (const m of messages) {
+                        await this._api(`/channels/${src.channelId}/messages/${m.id}`, token, { method: "DELETE" });
+                    }
+                    BdApi.UI.showToast("🗑️ Message(s) source supprimé(s).", { type: "info", timeout: 2000 });
                 }
             }
         } catch (err) {
