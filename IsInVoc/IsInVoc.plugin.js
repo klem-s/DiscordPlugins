@@ -2,10 +2,10 @@
  * @name IsInVoc
  * @author klem___s
  * @authorId 321332083731726338
- * @description Shows 🔊 after the username in the member list and chat
- *   when a user is in a voice channel on the current server.
- *   Hover the badge to see the channel name.
- * @version 1.0.2
+ * @description Shows the voice channel name after the username in the
+ *   member list and chat when a user is in a voice channel on the
+ *   current server.
+ * @version 1.1.0
  * @website https://github.com/klem-s
  * @source https://github.com/klem-s
  */
@@ -153,7 +153,7 @@ module.exports = class IsInVoc {
                         key: "iiv-member",
                         className: "iiv-badge",
                         title: `🔊 ${ch.name}`,
-                    }, "🔊");
+                    }, `(${ch.name})`);
 
                     if (!ret) return badge;
 
@@ -293,9 +293,10 @@ module.exports = class IsInVoc {
             return;
         }
 
-        // Already present → just update the tooltip
+        // Already present → just update the text/tooltip
         if (existing) {
-            existing.title = `🔊 ${ch.name}`;
+            existing.textContent = `(${ch.name})`;
+            existing.title       = `🔊 ${ch.name}`;
             return;
         }
 
@@ -304,7 +305,7 @@ module.exports = class IsInVoc {
 
         const badge = document.createElement("span");
         badge.className   = "iiv-badge";
-        badge.textContent = "🔊";
+        badge.textContent = `(${ch.name})`;
         badge.title       = `🔊 ${ch.name}`;
         anchor.insertAdjacentElement("afterend", badge);
     }
