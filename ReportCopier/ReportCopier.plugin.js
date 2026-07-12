@@ -221,16 +221,7 @@ module.exports = class ReportCopier {
                 const files   = await this._downloadImages(images);
                 totalImages  += files.length;
 
-                let content = message.content || "";
-                if (i === 0) {
-                    // Only the first copied message gets the source/reporter footer —
-                    // repeating it on every follow-up message would just be noise.
-                    const jumpLink = `https://discord.com/channels/${src.guildId}/${src.channelId}/${srcMsgId}`;
-                    const authorId = message.author?.id;
-                    const parts    = [content, "", `🔗 Source : ${jumpLink}`];
-                    if (authorId) parts.push(`👤 Reporter : <@${authorId}>`);
-                    content = parts.join("\n").trim();
-                }
+                let content = (message.content || "").trim();
                 if (content.length > 1990) content = content.slice(0, 1987) + "…";
 
                 if (!content && !files.length) continue; // nothing to migrate from this message
