@@ -105,10 +105,19 @@ module.exports = class ReportCopier {
     // ─────────────────────────────────────────────────────────────
 
     async _api(path, token, opts = {}) {
-        const resp = await BdApi.Net.fetch(`https://discord.com/api/v9${path}`, {
-            ...opts,
-            headers: { Authorization: token, ...(opts.headers ?? {}) },
-        });
+        const url     = `https://discord.com/api/v9${path}`;
+        const headers = { Authorization: token, ...(opts.headers ?? {}) };
+
+        // BdApi.Net.fetch replaces the auto-computed Content-Type (e.g. the multipart
+        // boundary for a FormData body) with whatever headers we pass in, so a FormData
+        // body needs its boundary header extracted and re-attached explicitly here.
+        if (opts.body instanceof FormData && !headers["Content-Type"]) {
+            const boundaryProbe = new Request(url, { method: opts.method ?? "GET", body: opts.body });
+            const contentType   = boundaryProbe.headers.get("content-type");
+            if (contentType) headers["Content-Type"] = contentType;
+        }
+
+        const resp = await BdApi.Net.fetch(url, { ...opts, headers });
         if (!resp.ok) {
             const body = await resp.text().catch(() => "");
             throw new Error(`HTTP ${resp.status} on ${path} — ${body.slice(0, 200)}`);
