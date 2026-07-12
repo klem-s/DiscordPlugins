@@ -116,6 +116,16 @@ module.exports = class ReportCopier {
         return resp.status === 204 ? null : resp.json();
     }
 
+    // GET /channels/{id}/messages/{id} (fetch a single message) is bot-only — a user token
+    // gets "50001/only bots can use this endpoint". The real client never calls it either:
+    // jumping to a link fetches a 1-message window *around* that ID instead, same as here.
+    async _fetchMessage(channelId, messageId, token) {
+        const list = await this._api(`/channels/${channelId}/messages?around=${messageId}&limit=1`, token);
+        const message = list?.find(m => m.id === messageId) ?? list?.[0];
+        if (!message) throw new Error("Message source introuvable (supprimé ou inaccessible).");
+        return message;
+    }
+
     _collectImages(message) {
         const images = [];
         for (const a of message.attachments ?? []) {
@@ -173,7 +183,7 @@ module.exports = class ReportCopier {
             // Forum-post starter messages share their thread's ID, so a plain thread
             // link (no message ID) still resolves to the report's original content.
             const srcMsgId = src.messageId ?? src.channelId;
-            const message   = await this._api(`/channels/${src.channelId}/messages/${srcMsgId}`, token);
+            const message   = await this._fetchMessage(src.channelId, srcMsgId, token);
 
             const images = this._collectImages(message);
             const files  = await this._downloadImages(images);
