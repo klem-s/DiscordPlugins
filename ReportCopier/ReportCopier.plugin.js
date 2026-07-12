@@ -6,7 +6,7 @@
  *   (source) post and the link of the post to keep (destination) — the plugin re-sends the
  *   source's text, links and @mention into the destination, and re-uploads its images as real
  *   attachments (never a pasted CDN link). Optional checkbox deletes the duplicate afterward.
- * @version 1.0.0
+ * @version 1.0.1
  * @website https://github.com/klem-s
  * @source https://github.com/klem-s
  */
@@ -199,6 +199,10 @@ module.exports = class ReportCopier {
         return { body: new Blob(parts), contentType: `multipart/form-data; boundary=${boundary}` };
     }
 
+    _sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
     async _postMessage(channelId, content, files, token) {
         const payload = { content };
         if (files.length) payload.attachments = files.map((f, i) => ({ id: i, filename: f.filename }));
@@ -242,6 +246,10 @@ module.exports = class ReportCopier {
 
                 if (!content && !files.length) continue; // nothing to migrate from this message
 
+                // Small randomized delay between sends so a multi-message copy doesn't
+                // fire as a burst — spread out closer to how a human would actually type.
+                if (i > 0) await this._sleep(800 + Math.random() * 700);
+
                 await this._postMessage(dst.channelId, content, files, token);
             }
 
@@ -257,8 +265,9 @@ module.exports = class ReportCopier {
                     await this._api(`/channels/${src.channelId}`, token, { method: "DELETE" });
                     BdApi.UI.showToast("🗑️ Post source (doublon) supprimé.", { type: "info", timeout: 2000 });
                 } else {
-                    for (const m of messages) {
-                        await this._api(`/channels/${src.channelId}/messages/${m.id}`, token, { method: "DELETE" });
+                    for (let i = 0; i < messages.length; i++) {
+                        if (i > 0) await this._sleep(800 + Math.random() * 700);
+                        await this._api(`/channels/${src.channelId}/messages/${messages[i].id}`, token, { method: "DELETE" });
                     }
                     BdApi.UI.showToast("🗑️ Message(s) source supprimé(s).", { type: "info", timeout: 2000 });
                 }
